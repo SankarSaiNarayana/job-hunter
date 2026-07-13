@@ -1,0 +1,39 @@
+{
+  "resume_path": "~/job-hunter/resume.pdf",
+  "location": "India",
+  "poll_minutes": 15,
+  "port": 8787,
+  "notifications": true,
+  "notify_min_score": 8,
+
+  "focus": ["swe", "devops", "aiml"],
+  "search_queries": ["software engineer", "devops engineer", "machine learning engineer", "ai engineer"],
+  "extra_keywords": [],
+
+  "sources": ["linkedin", "naukri", "remotive", "remoteok", "arbeitnow",
+              "weworkremotely", "jobicy", "himalayas", "workingnomads",
+              "themuse", "hnhiring", "greenhouse", "lever", "adzuna",
+              "jsearch", "findwork", "jooble"],
+
+  "fresh_hours": 24,
+  "archive_days": 7,
+  "greenhouse_boards": ["anthropic", "openai", "databricks", "stripe", "figma", "cloudflare"],
+  "lever_boards": ["plaid", "voleon", "attentive"],
+
+  "freelance_sources": ["freelancer", "truelancer"],
+  "freelance_queries": ["python", "ai agent", "automation", "web scraping", "llm"],
+
+  "repos": {
+    "topics": ["llm", "ai-agents", "machine-learning"],
+    "min_stars_rising": 200,
+    "refresh_hours": 12
+  },
+  "github_token": "",
+
+  "naukri": { "cookie": "" },
+  "adzuna": { "app_id": "", "app_key": "", "country": "in" },
+  "jsearch": { "rapidapi_key": "" },
+  "findwork": { "api_key": "" },
+  "jooble": { "api_key": "" },
+  "usajobs": { "api_key": "", "email": "" }
+}

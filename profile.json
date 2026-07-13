@@ -1,0 +1,37 @@
+{
+ "skills": [
+  "python",
+  "javascript",
+  "typescript",
+  "react",
+  "node.js",
+  "django",
+  "fastapi",
+  "rest api",
+  "microservices",
+  "machine learning",
+  "nlp",
+  "llm",
+  "generative ai",
+  "kafka",
+  "langchain",
+  "rag",
+  "prompt engineering",
+  "chatbot",
+  "conversational ai",
+  "postgresql",
+  "mongodb",
+  "redis",
+  "elasticsearch",
+  "aws",
+  "docker",
+  "kubernetes",
+  "ci/cd",
+  "git",
+  "backend"
+ ],
+ "roles": [
+  "software engineer"
+ ],
+ "years": 3.0
+}

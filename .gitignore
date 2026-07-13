@@ -1,0 +1,7 @@
+# local state — never commit your job history or resume
+data.db
+resume.pdf
+resume.docx
+.venv/
+__pycache__/
+.vercel/
