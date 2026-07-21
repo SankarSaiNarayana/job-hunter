@@ -7,6 +7,7 @@
   "notify_min_score": 8,
 
   "focus": ["swe", "devops", "aiml"],
+  "experience": { "min_years": 0, "max_years": 4, "include_unknown": true },
   "search_queries": ["software engineer", "devops engineer", "machine learning engineer", "ai engineer"],
   "extra_keywords": [],
 

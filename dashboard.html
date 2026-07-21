@@ -88,6 +88,9 @@
          background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
   .age.fresh { background: var(--good-soft); color: var(--good);
                border-color: transparent; }
+  .exp { font-size: 10.5px; font-weight: 700; border-radius: 999px; padding: 1px 7px;
+         background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
+  .exp.senior, .exp.lead { color: var(--warn); border-color: var(--warn); }
   .err { color: var(--warn); }
   details.dir { background: var(--card); border: 1px solid var(--border);
                 border-radius: 12px; padding: 10px 16px; margin-bottom: 14px; }
@@ -144,6 +147,14 @@
       <option value="8">Score ≥ 8</option>
       <option value="12">Score ≥ 12</option>
     </select>
+    <select id="expmax" title="Hide jobs asking for more experience than this">
+      <option value="">Any experience</option>
+      <option value="1">≤ 1 yr (intern/grad)</option>
+      <option value="2">≤ 2 yrs (junior)</option>
+      <option value="4">≤ 4 yrs</option>
+      <option value="6">≤ 6 yrs (mid)</option>
+      <option value="8">≤ 8 yrs (senior)</option>
+    </select>
   </div>
 </header>
 <main>
@@ -155,7 +166,7 @@
 </main>
 <script>
 const $ = s => document.querySelector(s);
-let view = 'jobs', stage = 'inbox', platforms = null, freshHours = 24;
+let view = 'jobs', stage = 'inbox', platforms = null, freshHours = 24, expInit = false;
 const STAGES = ['new','seen','applied','interviewing','offer','rejected','hidden','archived'];
 const CAT_LABEL = {swe:'SWE', devops:'DevOps', aiml:'AI/ML', other:''};
 
@@ -189,10 +200,26 @@ function agoLabel(j) {
   return h < 1 ? 'just in' : h < 24 ? Math.round(h) + 'h ago'
        : Math.round(h / 24) + 'd ago';
 }
+function expLabel(j) {
+  const mn = j.exp_min, mx = j.exp_max;
+  if (mn == null && mx == null) return '';        // unknown — no badge
+  if (mn != null && mx != null)
+    return mn === mx ? `${mn} yr${mn === 1 ? '' : 's'}` : `${mn}–${mx} yrs`;
+  if (mn != null) return `${mn}+ yrs`;
+  return `≤ ${mx} yrs`;
+}
 
 async function loadStatus() {
   const s = await api('/api/status');
   freshHours = s.fresh_hours || 24;
+  // Seed the experience filter from config once, so the inbox defaults to your
+  // level; after that, respect whatever the user picks.
+  if (!expInit) {
+    expInit = true;
+    const mx = (s.experience || {}).max_years;
+    if (mx != null && $('#expmax').querySelector(`option[value="${mx}"]`))
+      $('#expmax').value = String(mx);
+  }
   const last = s.last_poll ? new Date(s.last_poll).toLocaleString() : 'never';
   const errs = Object.keys(s.errors || {});
   const kind = view === 'gigs' ? 'gig' : 'job';
@@ -228,6 +255,7 @@ function jobCard(j) {
         ${j.category && CAT_LABEL[j.category] ? `<span class="cat ${j.category}">${CAT_LABEL[j.category]}</span>` : ''}
         <span class="src">${esc(j.source)}</span>
         ${agoLabel(j) ? `<span class="age ${isFresh(j) ? 'fresh' : ''}">${agoLabel(j)}</span>` : ''}
+        ${expLabel(j) ? `<span class="exp ${j.exp_level || ''}" title="required experience">${expLabel(j)}</span>` : ''}
         ${isTracked ? `<span class="stagechip ${j.stage}">${j.stage}</span>` : ''}
       </div>
       <div class="meta">${esc(j.company)}${j.location ? ' · ' + esc(j.location) : ''}
@@ -287,6 +315,7 @@ async function loadList() {
     min_score: view === 'gigs' ? '0' : $('#minscore').value,
     q: $('#q').value,
     source: $('#source').value,
+    exp_max: view === 'gigs' ? '' : $('#expmax').value,
   });
   const jobs = await api('/api/jobs?' + p);
   if (!jobs.length) {
@@ -358,10 +387,10 @@ $('#refresh').onclick = async () => {
   setTimeout(() => { loadStatus(); loadList(); }, 4000);
   setTimeout(() => { loadStatus(); loadList(); }, 20000);
 };
-['q','source','minscore','category'].forEach(id =>
+['q','source','minscore','category','expmax'].forEach(id =>
   $('#' + id).addEventListener('input', loadList));
 
-loadStatus(); loadList(); loadDirectory();
+loadStatus().then(loadList); loadDirectory();
 setInterval(() => { loadStatus(); if (view !== 'repos') loadList(); }, 90000);
 </script>
 </body>

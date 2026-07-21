@@ -74,6 +74,96 @@ def _find_terms(text: str, vocab: list) -> list:
     return found
 
 
+# --------------------------------------------------------- experience parsing
+# Best-effort estimate of how many years of experience a posting demands, so
+# the dashboard can hide roles that want far more experience than you have
+# (the "7-8+ years senior" postings) and keep the ones aimed at your level.
+
+# Seniority keyword -> (min_years, max_years, label). Ordered least→most senior;
+# when several match, the most senior one wins (highest floor). max_years is
+# None for open-ended levels ("senior and up"). These are matched against the
+# TITLE only — a "director"/"lead"/"senior" mentioned in passing in a job's
+# description body is not a reliable signal of the role's own seniority.
+_SENIORITY = [
+    (r"\b(?:intern|internship|trainee|fresher|apprentice)\b", 0, 1, "intern"),
+    (r"\b(?:entry[- ]level|graduate|new grad|junior|jr\.?|associate)\b",
+     0, 2, "junior"),
+    (r"\b(?:mid[- ]?level|intermediate)\b", 2, 5, "mid"),
+    (r"\b(?:senior|sr\.?)\b", 5, None, "senior"),
+    (r"\b(?:staff|principal|lead|architect|head of|distinguished|"
+     r"vp|fellow)\b", 8, None, "lead"),
+]
+
+# Rank so we can compare a title's seniority against a numeric estimate.
+_LEVEL_RANK = {"intern": 0, "junior": 1, "mid": 2, "senior": 3, "lead": 4}
+
+# "3-5 years", "3 to 5 yrs" — an explicit range.
+_EXP_RANGE = re.compile(
+    r"(\d{1,2})\s*(?:-|–|—|to)\s*(\d{1,2})\s*\+?\s*(?:years?|yrs?)")
+# "5+ years", "minimum 5 years", "at least 4 yrs", "5 years of experience".
+_EXP_MIN = re.compile(
+    r"(?:min(?:imum)?\.?\s*(?:of\s*)?|at\s*least\s*|over\s*|>\s*)?"
+    r"(\d{1,2})\s*\+?\s*(?:years?|yrs?)")
+
+
+def _level_for(years) -> str:
+    if years is None:
+        return ""
+    if years <= 1:
+        return "intern"
+    if years <= 2:
+        return "junior"
+    if years <= 5:
+        return "mid"
+    if years <= 8:
+        return "senior"
+    return "lead"
+
+
+def extract_experience(job: dict) -> tuple:
+    """Best-effort required experience for a posting.
+
+    Returns (exp_min, exp_max, level). exp_min/exp_max are ints (years) or
+    None when the posting doesn't say. `level` is a coarse label
+    (intern/junior/mid/senior/lead) or "" when unknown. An explicit numeric
+    range in the text wins; otherwise seniority words in the title/body are
+    used as a fallback."""
+    title = (job.get("title") or "").lower()
+    body = f"{title}\n{(job.get('description') or '').lower()}"
+
+    # 1) Explicit numbers, searched in the whole text.
+    n_min = n_max = None
+    m = _EXP_RANGE.search(body)
+    if m:
+        n_min, n_max = int(m.group(1)), int(m.group(2))
+        if n_min > n_max:                           # tolerate "5-3 years" typos
+            n_min, n_max = n_max, n_min
+    else:
+        m = _EXP_MIN.search(body)
+        if m:
+            n_min = int(m.group(1))
+
+    # 2) Seniority word in the TITLE only (most senior wins).
+    t_level, t_min, t_max = "", None, None
+    for pat, lo, hi, lab in _SENIORITY:
+        if re.search(pat, title):
+            t_level, t_min, t_max = lab, lo, hi
+
+    # 3) Reconcile. A senior/lead title is authoritative: it sets a floor a
+    #    stray number in the body ("2 years of Python") can't pull below, so
+    #    those roles don't leak into a junior filter. Otherwise trust numbers,
+    #    falling back to the title's range when the text gave none.
+    if t_level and _LEVEL_RANK[t_level] >= _LEVEL_RANK["senior"]:
+        exp_min = t_min if n_min is None else max(n_min, t_min)
+        exp_max = n_max                             # keep open-ended (None)
+        level = t_level
+    else:
+        exp_min = n_min if n_min is not None else t_min
+        exp_max = n_max if n_max is not None else t_max
+        level = t_level or _level_for(exp_min)
+    return exp_min, exp_max, level
+
+
 def extract_profile(resume_text: str, extra_keywords=None) -> dict:
     skills = _find_terms(resume_text, SKILLS)
     roles = _find_terms(resume_text, ROLES)

@@ -98,6 +98,8 @@ def poll(tasks=("jobs", "gigs", "repos")):
             for j in items:
                 score, matched, category = matcher.score_job(profile, j, focus)
                 j["score"], j["matched"], j["category"] = score, matched, category
+                j["exp_min"], j["exp_max"], j["exp_level"] = \
+                    matcher.extract_experience(j)
             return items
 
         if "jobs" in tasks:
@@ -163,7 +165,19 @@ def _maybe_notify(cfg, new_jobs):
     if not notify_hook or not cfg.get("notifications", True):
         return
     min_notify = cfg.get("notify_min_score", 8)
-    high = [j for j in new_jobs if j.get("score", 0) >= min_notify]
+    exp_cfg = cfg.get("experience") or {}
+    exp_max = exp_cfg.get("max_years")
+
+    def within_exp(j):
+        if exp_max is None:
+            return True
+        mn = j.get("exp_min")
+        if mn is None:                       # unknown experience
+            return exp_cfg.get("include_unknown", True)
+        return mn <= exp_max
+
+    high = [j for j in new_jobs
+            if j.get("score", 0) >= min_notify and within_exp(j)]
     if high:
         top = max(high, key=lambda j: j["score"])
         extra = f" (+{len(high) - 1} more)" if len(high) > 1 else ""
@@ -182,6 +196,17 @@ def route(method, path, q, body, headers):
             return 200, f.read(), "text/html; charset=utf-8"
 
     if method == "GET" and path == "/api/jobs":
+        exp_cfg = load_config().get("experience") or {}
+        # Query param overrides config; "" means "no ceiling" (show all).
+        exp_raw = q.get("exp_max", [None])[0]
+        if exp_raw is None:                       # not supplied -> use config
+            exp_max = exp_cfg.get("max_years")
+        elif exp_raw == "":                       # explicit "Any experience"
+            exp_max = None
+        else:
+            exp_max = int(exp_raw)
+        exp_unknown = q.get("exp_unknown", [
+            "1" if exp_cfg.get("include_unknown", True) else "0"])[0] != "0"
         rows = st.list_jobs(
             kind=q.get("kind", ["job"])[0],
             stage=q.get("stage", [q.get("state", ["inbox"])[0]])[0],
@@ -189,7 +214,10 @@ def route(method, path, q, body, headers):
             min_score=int(q.get("min_score", ["0"])[0] or 0),
             source=q.get("source", [""])[0],
             search=q.get("q", [""])[0],
-            limit=int(q.get("limit", ["200"])[0]))
+            limit=int(q.get("limit", ["200"])[0]),
+            exp_max=exp_max,
+            exp_floor=int(exp_cfg.get("min_years") or 0),
+            exp_unknown=exp_unknown)
         return 200, rows, "application/json"
 
     if method == "GET" and path == "/api/repos":
@@ -206,6 +234,7 @@ def route(method, path, q, body, headers):
                         "roles": profile["roles"][:5]},
             "queries": get_queries(cfg, profile),
             "focus": cfg.get("focus", ["swe", "devops", "aiml"]),
+            "experience": cfg.get("experience") or {},
             "last_poll": st.meta_get("last_poll"),
             "last_new": int(st.meta_get("last_new") or 0),
             "errors": json.loads(st.meta_get("errors") or "{}"),
@@ -262,7 +291,9 @@ class HttpMixin:
 
     def _dispatch(self):
         parsed = urlparse(self.path)
-        q = parse_qs(parsed.query)
+        # keep_blank_values so an explicit empty param (e.g. exp_max= meaning
+        # "Any experience") reaches the handler instead of silently vanishing.
+        q = parse_qs(parsed.query, keep_blank_values=True)
         length = int(self.headers.get("Content-Length") or 0)
         body = {}
         if length:

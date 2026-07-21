@@ -41,6 +41,9 @@ _JOB_COLUMNS = [
     ("description", "TEXT"),
     ("tags", "TEXT"),
     ("category", "TEXT DEFAULT ''"),         # 'swe' | 'devops' | 'aiml' | 'other'
+    ("exp_min", "INTEGER"),                   # required experience (years), or NULL
+    ("exp_max", "INTEGER"),
+    ("exp_level", "TEXT"),                    # intern|junior|mid|senior|lead|'' (NULL=unparsed)
     ("posted_at", "TEXT"),
     ("fetched_at", "TEXT"),
     ("first_seen", "TEXT"),
@@ -207,6 +210,36 @@ class Store:
         self.backend.execute(
             "UPDATE jobs SET last_seen = fetched_at WHERE last_seen IS NULL")
         self._backfill_fingerprints()
+        self._backfill_experience()
+
+    # Bump when matcher.extract_experience changes so stored rows re-parse.
+    EXP_PARSE_VERSION = "2"
+
+    def _backfill_experience(self):
+        """Parse required experience for rows that predate this feature
+        (exp_level is NULL). Non-destructive. Local SQLite is fast and
+        in-process, so we finish in one startup; Turso does one batch per
+        serverless invocation and converges over successive polls."""
+        import matcher
+        # When the parser changes, clear the tags so every row is re-parsed.
+        if self.meta_get("exp_parse_version") != self.EXP_PARSE_VERSION:
+            self.backend.execute("UPDATE jobs SET exp_level = NULL")
+            self.meta_set("exp_parse_version", self.EXP_PARSE_VERSION)
+        while True:
+            rows = self.backend.execute(
+                "SELECT id, title, description FROM jobs "
+                "WHERE exp_level IS NULL LIMIT 500")
+            if not rows:
+                return
+            stmts = []
+            for r in rows:
+                mn, mx, lvl = matcher.extract_experience(r)
+                stmts.append((
+                    "UPDATE jobs SET exp_min=?, exp_max=?, exp_level=? WHERE id=?",
+                    [mn, mx, lvl or "", r["id"]]))
+            self.backend.execute_many(stmts)
+            if self.mode != "sqlite":
+                return                      # incremental across invocations
 
     def _backfill_fingerprints(self):
         rows = self.backend.execute(
@@ -253,13 +286,14 @@ class Store:
                 fps.add(fp)
             inserts.append((
                 "INSERT INTO jobs (id, kind, source, title, company, location, "
-                "url, description, tags, category, posted_at, fetched_at, "
-                "first_seen, last_seen, score, matched, state, stage, "
-                "stage_updated, notes, fingerprint) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new','new',?,'',?)",
+                "url, description, tags, category, exp_min, exp_max, exp_level, "
+                "posted_at, fetched_at, first_seen, last_seen, score, matched, "
+                "state, stage, stage_updated, notes, fingerprint) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'new','new',?,'',?)",
                 [jid, j.get("kind", "job"), j["source"], j["title"], j["company"],
                  j["location"], j["url"], j["description"],
                  json.dumps(j.get("tags") or []), j.get("category", "other"),
+                 j.get("exp_min"), j.get("exp_max"), j.get("exp_level", ""),
                  j.get("posted_at", ""), now, now, now,
                  j.get("score", 0), json.dumps(j.get("matched") or []), now, fp]))
             new_jobs.append(j)
@@ -275,7 +309,8 @@ class Store:
         return new_jobs
 
     def list_jobs(self, kind="job", stage="inbox", category="", min_score=0,
-                  source="", search="", limit=200):
+                  source="", search="", limit=200,
+                  exp_max=None, exp_floor=0, exp_unknown=True):
         where, params = ["kind = ?"], [kind]
         if stage == "inbox":
             where.append("stage IN ('new','seen')")
@@ -285,6 +320,22 @@ class Store:
         if category:
             where.append("category = ?")
             params.append(category)
+        # Experience filter: drop postings that demand more years than you want
+        # (their required minimum exceeds exp_max) or that are below your floor.
+        # Rows with unknown experience are kept unless exp_unknown is False.
+        if exp_max is not None or exp_floor:
+            known = []
+            if exp_max is not None:
+                known.append("exp_min <= ?")
+                params.append(int(exp_max))
+            if exp_floor:
+                known.append("(exp_max IS NULL OR exp_max >= ?)")
+                params.append(int(exp_floor))
+            known_sql = "(" + " AND ".join(known) + ")"
+            if exp_unknown:
+                where.append(f"(exp_min IS NULL OR {known_sql})")
+            else:
+                where.append(f"(exp_min IS NOT NULL AND {known_sql})")
         if min_score:
             where.append("score >= ?")
             params.append(int(min_score))
